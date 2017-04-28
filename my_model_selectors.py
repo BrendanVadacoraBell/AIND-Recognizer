@@ -77,7 +77,31 @@ class SelectorBIC(ModelSelector):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
         # TODO implement model selection based on BIC scores
-        raise NotImplementedError
+        
+        #less is better with BIC
+        min_score = float("inf")
+        min_model = None
+
+        #get the logarithm of the number of data points
+        logN = np.log(len(self.X))
+        
+        #get the BIC score for each number of components
+        for n in range(self.min_n_components, self.max_n_components):
+            try:
+                model = self.base_model(n)
+                logL = model.score(self.X, self.lengths)
+
+                score = -2*logL + n*logN
+
+                if score < min_score:
+                    min_score = score
+                    min_model = model
+            except:
+                pass
+
+        return min_model
+                
+        
 
 
 class SelectorDIC(ModelSelector):
@@ -92,8 +116,27 @@ class SelectorDIC(ModelSelector):
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        # TODO implement model selection based on DIC scores
-        raise NotImplementedError
+        max_score = float("-inf")
+        max_model = None
+
+        for n in range(self.min_n_components, self.max_n_components):
+            try:
+                model = self.base_model(n)
+                logL = model.score(self.X, self.lengths)
+
+                #(1/M-1)*SUM(logL of all other words)
+                other_words_mean = np.mean([model.score(*self.hwords[word]) for word in self.words if word is not self.this_word])
+
+                #DIC = logL (of this word) - MEAN(logL of all other words)
+                score = logL - other_words_mean
+
+                if score > max_score:
+                    max_score = score
+                    max_model = model
+            except:
+                pass
+
+        return max_model
 
 
 class SelectorCV(ModelSelector):
@@ -104,5 +147,32 @@ class SelectorCV(ModelSelector):
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        # TODO implement model selection using CV
-        raise NotImplementedError
+        
+        max_score = float("-inf")
+        max_model = None
+
+        #Avoid the ValueError thrown if the number of splits is greater than the number of sequences
+        number_of_splits = 3
+        if len(self.sequences) < 3:
+            number_of_splits = 2
+        
+        kf = KFold(n_splits = number_of_splits)
+
+        for n in range(self.min_n_components, self.max_n_components):
+            for cv_train_idx, cv_test_idx in kf.split(self.sequences):
+                try:
+                    
+                    test, test_lengths = combine_sequences(cv_test_idx, self.sequences)
+
+                    model = self.base_model(n)
+
+                    score = model.score(test, test_lengths)
+
+                    if score > max_score:
+                        max_score = score
+                        max_model = model
+                except:
+                    pass
+
+        return max_model
+        
