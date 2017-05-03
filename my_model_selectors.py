@@ -84,15 +84,23 @@ class SelectorBIC(ModelSelector):
 
         #get the logarithm of the number of data points
         logN = np.log(len(self.X))
+
+        #get the features needed to determine the number of free parameters
+        features = len(self.X[0])
         
         #get the BIC score for each number of components
-        for n in range(self.min_n_components, self.max_n_components):
+        for n in range(self.min_n_components, self.max_n_components +1):
             try:
                 model = self.base_model(n)
                 logL = model.score(self.X, self.lengths)
 
-                score = -2*logL + n*logN
+                #calculate free parameters https://ai-nd.slack.com/archives/C4GQUB39T/p1491489096823164
+                p = n**2 + 2*features*n-1
 
+                #BIC = -2 * logL + p * logN
+                score = -2*logL + p*logN
+
+                #find the minimum score and model
                 if score < min_score:
                     min_score = score
                     min_model = model
@@ -119,17 +127,18 @@ class SelectorDIC(ModelSelector):
         max_score = float("-inf")
         max_model = None
 
-        for n in range(self.min_n_components, self.max_n_components):
+        for n in range(self.min_n_components, self.max_n_components +1):
             try:
                 model = self.base_model(n)
                 logL = model.score(self.X, self.lengths)
 
-                #(1/M-1)*SUM(logL of all other words)
+                #(1/M-1)*SUM(logL of all other words) which is just the average of scores for all other words
                 other_words_mean = np.mean([model.score(*self.hwords[word]) for word in self.words if word is not self.this_word])
 
                 #DIC = logL (of this word) - MEAN(logL of all other words)
                 score = logL - other_words_mean
 
+                #find the maximum score and model
                 if score > max_score:
                     max_score = score
                     max_model = model
@@ -151,23 +160,49 @@ class SelectorCV(ModelSelector):
         max_score = float("-inf")
         max_model = None
 
-        #Avoid the ValueError thrown if the number of splits is greater than the number of sequences
-        number_of_splits = 3
-        if len(self.sequences) < 3:
-            number_of_splits = 2
-        
+        number_of_splits = 2
+
+        #Experimenting with different number of splits/folds resulted in faster training but less accurate recognition
+        #3 splits seemed to be optimal for recognition
+        #splitting via each sequence increased the time far too drastically
+        #https://www.google.co.za/url?sa=t&rct=j&q=&esrc=s&source=web&cd=14&cad=rja&uact=8&ved=0ahUKEwjeltztvNPTAhUlCMAKHQ2kC-sQtwIIaDAN&url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3DTIgfjmp-4BA&usg=AFQjCNE4Exuvh9hlKIUBHtQLVCv4wb7b7g&sig2=iGwWzrlzDGTHrCoINIInCA
+        if len(self.sequences) > 2:
+            number_of_splits = 3
+
+        #create the KFold obj
         kf = KFold(n_splits = number_of_splits)
 
-        for n in range(self.min_n_components, self.max_n_components):
-            for cv_train_idx, cv_test_idx in kf.split(self.sequences):
-                try:
-                    
-                    test, test_lengths = combine_sequences(cv_test_idx, self.sequences)
+        for n in range(self.min_n_components, self.max_n_components + 1):
+            try:
+                #score for each split
+                for cv_train_idx, cv_test_idx in kf.split(self.sequences):
+                    try:
 
+                        #get the test and test lengths
+                        test, test_lengths = combine_sequences(cv_test_idx, self.sequences)
+
+                        #get the base model
+                        model = self.base_model(n)
+
+                        #score the model against the test
+                        score = model.score(test, test_lengths)
+
+                        #find the max score and model
+                        if score > max_score:
+                            max_score = score
+                            max_model = model
+                    except:
+                        pass
+            except:
+                #some sequences have only 1 sequence long and therefore kf.split will throw an error
+                try:                       
+                    #model
                     model = self.base_model(n)
 
-                    score = model.score(test, test_lengths)
+                    #get the score of the word
+                    score = model.score(self.X, self.lengths)
 
+                    #find the max score and model
                     if score > max_score:
                         max_score = score
                         max_model = model
