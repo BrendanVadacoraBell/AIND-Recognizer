@@ -169,32 +169,50 @@ class SelectorCV(ModelSelector):
         if len(self.sequences) > 2:
             number_of_splits = 3
 
+        #If the sequence length is 1, it obviouslt cannot be folded
+        can_fold = len(self.sequences) > 1
+
         #create the KFold obj
         kf = KFold(n_splits = number_of_splits)
 
+        #init n_component dictionary of model score averages (average of all splits for a given n)
+        n_score_average = {}
+        
         for n in range(self.min_n_components, self.max_n_components + 1):
-            try:
+            if can_fold:
+                n_scores = []
                 #score for each split
+                
                 for cv_train_idx, cv_test_idx in kf.split(self.sequences):
                     try:
 
-                        #get the test and test lengths
-                        test, test_lengths = combine_sequences(cv_test_idx, self.sequences)
-
-                        #get the base model
-                        model = self.base_model(n)
-
+                        #get the train_x and train lengths
+                        train_x, train_lengths = combine_sequences(cv_train_idx, self.sequences)
+                        
+                        #get the test_x and test lengths
+                        test_x, test_lengths = combine_sequences(cv_test_idx, self.sequences)
+                        
+                        #get the model fitted to the training 
+                        model = GaussianHMM(n_components=n, covariance_type="diag", n_iter=1000,
+                                        random_state=self.random_state, verbose=False).fit(train_x, train_lengths)
+                        
                         #score the model against the test
-                        score = model.score(test, test_lengths)
+                        score = model.score(test_x, test_lengths)
 
-                        #find the max score and model
-                        if score > max_score:
-                            max_score = score
-                            max_model = model
+                        #add this score to the n scores list
+                        n_scores.append(score)
+
                     except:
                         pass
-            except:
-                #some sequences have only 1 sequence long and therefore kf.split will throw an error
+
+                #average out the scores 
+                if len(n_scores) > 0:
+                    n_mean = np.mean(n_scores)
+                    n_score_average[n] = n_mean
+                
+            else:
+                #some words have only 1 sequence long and therefore kf.split will throw an error
+                #purposefully kept the logic in the n_components loop to find the best n
                 try:                       
                     #model
                     model = self.base_model(n)
@@ -202,12 +220,23 @@ class SelectorCV(ModelSelector):
                     #get the score of the word
                     score = model.score(self.X, self.lengths)
 
-                    #find the max score and model
+                    #set the max score and model
                     if score > max_score:
                         max_score = score
                         max_model = model
+
+                    
                 except:
                     pass
+
+        #if the folding technique was used, the biggest average must be found and the model created
+        if can_fold and len(n_score_average) > 0:
+            
+            #get the n_component with the highest average
+            n_components = max(n_score_average, key=n_score_average.get)
+            #create the model with the n fitted to the whole set
+            max_model = self.base_model(n_components)
+            
 
         return max_model
         
